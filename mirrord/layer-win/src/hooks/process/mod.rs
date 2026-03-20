@@ -6,7 +6,6 @@
 
 use std::sync::OnceLock;
 
-use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult, windows::WindowsError},
     process::windows::execution::{CreateProcessInternalWType, LayerManagedProcess},
@@ -27,7 +26,7 @@ use winapi::{
 };
 
 use crate::{
-    apply_hook,
+    DetourEngineGuard, apply_hook,
     process::{environment::parse_environment_block, get_module_name},
 };
 
@@ -247,7 +246,7 @@ unsafe extern "system" fn getprocaddress_detour(
 ///
 /// Installs the CreateProcessInternalW hook using the detours library to intercept
 /// all process creation calls and redirect them through our unified mirrord system.
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
+pub fn initialize_hooks(guard: &mut DetourEngineGuard<'static>) -> LayerResult<()> {
     // NOTE(gabriela): handling this at syscall level is super cumbersome
     // and undocumented, so I'd have to reverse engineer CreateProcessInternalW
     // which is like, 3000-ish lines without type fixups, and we shipped this before

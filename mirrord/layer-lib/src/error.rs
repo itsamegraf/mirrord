@@ -303,7 +303,7 @@ pub enum LayerError {
 
     #[cfg(target_os = "windows")]
     #[error("Detour guard failure: {0}")]
-    DetourGuard(String),
+    DetourEngineGuard(String),
 
     #[cfg(target_os = "windows")]
     #[error("Environment variable for layer id not present")]

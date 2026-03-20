@@ -15,7 +15,6 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use minhook_detours_rs::guard::DetourGuard;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
@@ -67,7 +66,7 @@ use self::{
         get_actual_bound_address,
     },
 };
-use crate::{apply_hook, process::elevation::require_elevation};
+use crate::{DetourEngineGuard, apply_hook, process::elevation::require_elevation};
 
 // Function type definitions for original Windows socket functions
 type SocketType = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
@@ -1780,7 +1779,10 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
 }
 
 /// Initialize socket hooks by setting up detours for Windows socket functions
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) -> LayerResult<()> {
+pub fn initialize_hooks(
+    guard: &mut DetourEngineGuard<'static>,
+    setup: &LayerSetup,
+) -> LayerResult<()> {
     // Ensure winsock libraries are loaded before attempting to hook them
     // This prevents issues with Python's _socket.pyd or other dynamic loaders
     // ensure_winsock_libraries_loaded()?;

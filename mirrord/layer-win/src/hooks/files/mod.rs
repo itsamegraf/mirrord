@@ -12,7 +12,6 @@
 
 use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
-use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
     LayerResult,
     file::filter::FileMode,
@@ -51,7 +50,7 @@ use winapi::{
 };
 
 use crate::{
-    apply_hook,
+    DetourEngineGuard, apply_hook,
     hooks::files::{
         managed_handle::{
             HandleContext, MANAGED_HANDLES, for_each_handle_with_path, try_insert_handle,
@@ -1479,7 +1478,7 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     }
 }
 
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
+pub fn initialize_hooks(guard: &mut DetourEngineGuard<'static>) -> LayerResult<()> {
     // ----------------------------------------------------------------------------
     // ~NOTE(gabriela):
     //

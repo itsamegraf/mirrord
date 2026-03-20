@@ -17,7 +17,9 @@ mod subprocess;
 use std::{io::Write, thread};
 
 use libc::EXIT_FAILURE;
-use minhook_detours_rs::guard::DetourGuard;
+// Note: Renaming minhook_detours_rs's DetourGuard to prevent name ambiguity with layer-lib's
+// DetourGuard
+pub use minhook_detours_rs::guard::DetourGuard as DetourEngineGuard;
 use mirrord_config::util::read_resolved_config;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
@@ -36,24 +38,26 @@ use crate::{
     hooks::initialize_hooks,
     subprocess::{create_proxy_connection, detect_process_context},
 };
-pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
+pub static mut DETOUR_ENGINE_GUARD: Option<DetourEngineGuard> = None;
 
-fn initialize_detour_guard() -> LayerResult<()> {
+fn initialize_detour_engine_guard() -> LayerResult<()> {
     unsafe {
-        DETOUR_GUARD =
-            Some(DetourGuard::new().map_err(|err| LayerError::DetourGuard(err.to_string()))?);
+        DETOUR_ENGINE_GUARD = Some(
+            DetourEngineGuard::new()
+                .map_err(|err| LayerError::DetourEngineGuard(err.to_string()))?,
+        );
     }
 
     Ok(())
 }
 
-fn release_detour_guard() -> LayerResult<()> {
+fn release_detour_engine_guard() -> LayerResult<()> {
     unsafe {
         // This will release the hooking engine, removing all hooks.
-        if let Some(guard) = DETOUR_GUARD.as_mut() {
+        if let Some(guard) = DETOUR_ENGINE_GUARD.as_mut() {
             guard
                 .try_close()
-                .map_err(|err| LayerError::DetourGuard(err.to_string()))?;
+                .map_err(|err| LayerError::DetourEngineGuard(err.to_string()))?;
         }
     }
 
@@ -93,10 +97,10 @@ fn layer_start() -> LayerResult<()> {
         tracing::info!("ProxyConnection initialized");
     }
 
-    initialize_detour_guard()?;
-    tracing::info!("DetourGuard initialized");
+    initialize_detour_engine_guard()?;
+    tracing::info!("DetourEngineGuard initialized");
 
-    let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
+    let guard = unsafe { DETOUR_ENGINE_GUARD.as_mut().unwrap() };
     initialize_hooks(guard)?;
     tracing::info!("Hooks initialized");
 
@@ -148,7 +152,7 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Release detour guard
-    if let Err(e) = release_detour_guard() {
+    if let Err(e) = release_detour_engine_guard() {
         tracing::error!(
             "Warning: Failed releasing detour guard during DLL detach: {}",
             e

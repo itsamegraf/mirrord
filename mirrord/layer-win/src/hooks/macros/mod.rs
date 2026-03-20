@@ -4,7 +4,7 @@
 ///
 /// # Arguments
 ///
-/// * `guard` - Instance, or mutable reference of [`minhook_detours_rs::guard::DetourGuard`].
+/// * `guard` - Instance, or mutable reference of [`crate::DetourEngineGuard`].
 /// * `dll` - Name of the target API's DLL.
 /// * `fn` - Name of the target API.
 /// * `detour` - Rust detour for target API.
