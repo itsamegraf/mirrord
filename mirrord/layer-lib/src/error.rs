@@ -289,11 +289,11 @@ pub enum LayerError {
     #[error("Global {0} already initialized")]
     GlobalAlreadyInitialized(&'static str),
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Hook engine failure: {0}")]
     HookEngine(String),
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Hook engine failure while applying {function} from {dll}: {error}")]
     HookEngineApply {
         function: &'static str,
@@ -301,39 +301,39 @@ pub enum LayerError {
         error: String,
     },
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Detour guard failure: {0}")]
     DetourEngineGuard(String),
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Environment variable for layer id not present")]
     MissingLayerIdEnv,
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Environment variable for layer id not valid u64")]
     MalformedLayerIdEnv,
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Environment variable for config not present")]
     MissingConfigEnv,
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Windows process creation failed: {0}")]
     WindowsProcessCreation(#[from] crate::error::windows::WindowsError),
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("DLL injection failed: {0}")]
     DllInjection(String),
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Process synchronization failed: {0}")]
     ProcessSynchronization(String),
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Process with PID {0} not found")]
     ProcessNotFound(u32),
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Internal error: missing required function pointer for {0}")]
     MissingFunctionPointer(String),
 }
