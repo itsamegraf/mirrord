@@ -8,16 +8,15 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
+use std::{cell::RefCell, net::SocketAddr, ops::Deref, sync::OnceLock};
 #[cfg(unix)]
-use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf};
-use std::{net::SocketAddr, sync::OnceLock};
+use std::{ffi::CString, path::PathBuf};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
 
 use crate::{error::HookError, socket::sockets::SocketDescriptor};
 
-#[cfg(unix)]
 thread_local!(
     /// Holds the thread-local state for bypassing the layer's detour functions.
     ///
@@ -45,7 +44,6 @@ thread_local!(
 /// Sets [`DETOUR_BYPASS`] to `false`.
 ///
 /// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
-#[cfg(unix)]
 pub(super) fn detour_bypass_off() {
     DETOUR_BYPASS.with(|enabled| {
         if let Ok(mut bypass) = enabled.try_borrow_mut() {
@@ -62,10 +60,8 @@ pub(super) fn detour_bypass_off() {
 ///
 /// You should always use `DetourGuard::new`, if you construct this in any other way, it's
 /// not going to guard anything.
-#[cfg(unix)]
 pub struct DetourGuard;
 
-#[cfg(unix)]
 impl DetourGuard {
     /// Create a new DetourGuard if it's not already enabled.
     pub fn new() -> Option<Self> {
@@ -87,7 +83,6 @@ impl DetourGuard {
     }
 }
 
-#[cfg(unix)]
 impl Drop for DetourGuard {
     fn drop(&mut self) {
         detour_bypass_off();
@@ -97,11 +92,9 @@ impl Drop for DetourGuard {
 /// Wrapper around [`OnceLock`], mainly used for the [`Deref`] implementation
 /// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
 /// `FN_ORIGINAL.get().unwrap()`.
-#[cfg(unix)]
 #[derive(Debug)]
 pub struct HookFn<T>(OnceLock<T>);
 
-#[cfg(unix)]
 impl<T> Deref for HookFn<T> {
     type Target = T;
 
@@ -110,7 +103,6 @@ impl<T> Deref for HookFn<T> {
     }
 }
 
-#[cfg(unix)]
 impl<T> HookFn<T> {
     /// Helper function to set the inner [`OnceLock`] `T` of `self`.
     pub fn set(&self, value: T) -> Result<(), T> {
