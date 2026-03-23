@@ -46,11 +46,12 @@ pub use winapi::{
 };
 
 #[cfg(unix)]
-use crate::detour::{Detour, DetourGuard, OptionExt};
+use crate::detour::{Detour, OptionExt};
 #[cfg(windows)]
 use crate::error::windows::{WindowsError, WindowsResult};
 pub use crate::{
-    ConnectError, HookError, HookResult, detour::Bypass,
+    ConnectError, HookError, HookResult, 
+    detour::{Bypass, DetourGuard},
     proxy_connection::make_proxy_request_no_response, setup::setup,
     socket::dns::remote_getaddrinfo,
 };
@@ -599,7 +600,6 @@ impl OutgoingSelector {
             return Ok(address);
         };
 
-        #[cfg(unix)]
         let _guard = DetourGuard::new();
 
         Resolver::from_system_conf()?
@@ -695,7 +695,6 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
                         }
                     }
                 } else {
-                    #[cfg(unix)]
                     let _guard = DetourGuard::new();
 
                     // Fall back to local resolution.
