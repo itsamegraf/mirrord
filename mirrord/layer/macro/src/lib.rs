@@ -176,9 +176,18 @@ pub fn hook_guard_fn(
             #visibility type #type_name = #bare_fn
         };
 
-        // `pub(crate) static FN_CLOSE: HookFn<FnClose> = HookFn::default()`
+        let hookfn_type_alias = if cfg!(unix) {
+            // unix: `pub(crate) type HookFnClose = HookFn<HookFnClose>`
+            quote! { mirrord_layer_lib::detour::HookFn<#type_name> }
+        } else {
+            // windows: `pub(crate) type HookFnClose = HookFn<&HookFnClose>` 
+            // windows' hook manager return a reference to the hook
+            quote! { mirrord_layer_lib::detour::HookFn<&#type_name> }
+        };
+
+        // `pub(crate) static FN_CLOSE: HookFnClose = HookFn::default()`
         let original_fn = quote! {
-            #visibility static #static_name: mirrord_layer_lib::detour::HookFn<#type_name> =
+            #visibility static #static_name: #hookfn_type_alias =
                 mirrord_layer_lib::detour::HookFn::default_const()
         };
 
