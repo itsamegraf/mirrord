@@ -11,8 +11,7 @@ pub(crate) mod utils;
 use std::{
     net::SocketAddr,
     ops::Not,
-    ptr,
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 
 use mirrord_intproxy_protocol::{
@@ -1037,28 +1036,9 @@ unsafe extern "system" fn wsa_send_to_detour(
         }
     };
 
-    // Handle overlapped I/O operations by falling back to original for async operations
-    if !lpOverlapped.is_null() || lpCompletionRoutine.is_some() {
-        return fallback_to_original("overlapped I/O detected");
+    if lpNumberOfBytesSent.is_null() {
+        return fallback_to_original("null lpNumberOfBytesSent");
     }
-
-    // For synchronous operations, we can use layer-lib functionality
-    // Extract buffer data using our safe wrapper
-    let buffer_data = match WSABufferData::try_from((lpBuffers, dwBufferCount)) {
-        Ok(data) => data,
-        Err(_) => {
-            return fallback_to_original("invalid buffer parameters");
-        }
-    };
-
-    tracing::debug!(
-        "wsa_send_to_detour -> buffer_count: {}, total_length: {}, is_single: {}",
-        buffer_data.buffer_count(),
-        buffer_data.total_length(),
-        buffer_data.is_single_buffer()
-    );
-
-    tracing::debug!("wsa_send_to_detour -> buffer: {:?}", buffer_data);
 
     // From Docs: (https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-wsasendto#remarks)
     // The WSASendTo function is normally used on a connectionless socket specified by s to send a
@@ -1089,79 +1069,37 @@ unsafe extern "system" fn wsa_send_to_detour(
         None => unreachable!(),
     };
 
-    // For simple single-buffer case, use layer-lib functionality
-    if buffer_data.is_single_buffer() {
-        let (first_buf_ptr, first_buf_len) = buffer_data.first_buffer().unwrap();
-
-        // Windows WSASendTo function wrapper for layer-lib
-        let wsa_sendto_fn = |sockfd: SOCKET,
-                             buffer: *const u8,
-                             length: usize,
-                             send_flags: i32,
-                             addr: SockAddr|
-         -> HookResult<isize> {
-            if lpNumberOfBytesSent.is_null() {
-                return Err(HookError::NullPointer);
-            }
-
-            let original = WSA_SEND_TO_ORIGINAL.get().unwrap();
-
-            // Create a WSABUF for the single buffer using our helper
-            let wsabuf = buffer_data.create_single_wsabuf(buffer, length as u32);
-
-            let mut bytes_sent = 0u32;
-            let result = unsafe {
-                original(
-                    sockfd,
-                    &wsabuf as *const _ as *mut u8,
-                    1, // dwBufferCount
-                    &mut bytes_sent,
-                    send_flags as u32,
-                    addr.as_ptr() as *const SOCKADDR,
-                    addr.len() as INT,
-                    std::ptr::null_mut(), // lpOverlapped
-                    std::ptr::null_mut(), // lpCompletionRoutine
-                )
-            };
-
-            if result == ERROR_SUCCESS_I32 {
-                // Success - update bytes sent if caller provided pointer
-                unsafe { *lpNumberOfBytesSent = bytes_sent };
-                Ok(result.try_into().unwrap())
-            } else {
-                Err(SendToError::SendFailed(result.try_into().unwrap()).into())
-            }
+    // Windows WSASendTo function wrapper for layer-lib
+    let call_original = |sockfd: SOCKET,
+                            addr: SockAddr|
+        -> Detour<INT> {
+        // Create a WSABUF for the single buffer using our helper
+        let mut bytes_sent = 0u32;
+        let result = unsafe {
+            FN_WSA_SEND_TO(
+                sockfd,
+                lpBuffers,
+                dwBufferCount,
+                lpNumberOfBytesSent,
+                dwFlags,
+                addr.as_ptr() as *const SOCKADDR,
+                addr.len() as INT,
+                lpOverlapped,
+                lpCompletionRoutine,
+            )
         };
 
-        // Use the shared layer-lib sendto functionality
-        match send_to(
-            s,
-            first_buf_ptr,
-            first_buf_len as usize,
-            dwFlags as i32,
-            raw_destination,
-            wsa_sendto_fn,
-        ) {
-            Ok(sendto_result) => {
-                tracing::debug!(
-                    "wsa_send_to_detour -> layer-lib sendto success: {} bytes",
-                    sendto_result
-                );
-                // WSASendTo returns 0 on success
-                ERROR_SUCCESS_I32
-            }
-            Err(_) => {
-                // On error, fall back to original function
-                fallback_to_original("layer-lib sendto failed")
-            }
+        if result == ERROR_SUCCESS_I32 {
+            // Success - update bytes sent if caller provided pointer
+            unsafe { *lpNumberOfBytesSent = bytes_sent };
+            Detour::Success(result.try_into().unwrap())
+        } else {
+            Detour::Error(SendToError::SendFailed(result.try_into().unwrap()).into())
         }
-    } else {
-        // For multi-buffer or complex cases, fall back to original function
-        fallback_to_original(&format!(
-            "multi-buffer case (count: {})",
-            buffer_data.buffer_count()
-        ))
-    }
+    };
+
+    send_to(call_original, s, raw_destination)
+        .unwrap_or_bypass_with(|_| unsafe { fallback_to_original("layer-lib sendto bypass") })
 }
 
 /// Windows winsock hook for gethostname
@@ -1560,6 +1498,22 @@ unsafe extern "system" fn sendto_detour(
         tolen
     );
 
+    // Windows sendto function wrapper
+    let call_original = |sockfd: SOCKET,
+                         addr: SockAddr|
+     -> Detour<INT> {
+        Detour::Success(unsafe {
+            FN_SENDTO(
+                sockfd,
+                buf,
+                len,
+                flags,
+                addr.as_ptr() as *const SOCKADDR,
+                addr.len() as INT,
+            )
+        })
+    };
+
     // Helper function to consolidate all fallback calls to original sendto
     let fallback_to_original = |reason: &str| -> INT {
         tracing::debug!("sendto_detour -> falling back to original: {}", reason);
@@ -1574,45 +1528,8 @@ unsafe extern "system" fn sendto_detour(
         }
     };
 
-    // Windows sendto function wrapper
-    let sendto_fn = |sockfd: SOCKET,
-                     buffer: *const u8,
-                     length: usize,
-                     send_flags: i32,
-                     addr: SockAddr|
-     -> HookResult<isize> {
-        let original = SEND_TO_ORIGINAL.get().unwrap();
-        let result = unsafe {
-            original(
-                sockfd,
-                buffer as *const i8,
-                length as INT,
-                send_flags,
-                addr.as_ptr() as *const SOCKADDR,
-                addr.len() as INT,
-            )
-        };
-        Ok(result as isize)
-    };
-
-    // Use the shared layer-lib sendto functionality
-    match send_to(
-        s,
-        buf as *const u8,
-        len as usize,
-        flags,
-        raw_destination,
-        sendto_fn,
-    ) {
-        Ok(result) => {
-            tracing::debug!(
-                "sendto_detour -> layer-lib sendto success: {} bytes",
-                result
-            );
-            result as INT
-        }
-        Err(e) => fallback_to_original(&format!("layer-lib error: {:?}", e)),
-    }
+    send_to(call_original, s, raw_destination)
+        .unwrap_or_bypass_with(|_| fallback_to_original("layer-lib sendto bypass"))
 }
 
 /// Socket management detour for closesocket() - closes a socket

@@ -21,7 +21,10 @@ use tracing::error;
 use tracing::{Level, debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
-use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR};
+use winapi::{
+    shared::minwindef::INT,
+    um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR}
+};
 
 use crate::{
     detour::{Bypass, Detour},
@@ -629,27 +632,21 @@ pub fn send_dns_patch(
 /// supports both DNS resolution (port 53) and regular UDP packet sending.
 ///
 /// ## Parameters
+/// - `call_original`: Platform-specific sendto function
 /// - `sockfd`: Socket file descriptor
-/// - `raw_message`: Pointer to the message buffer
-/// - `message_length`: Length of the message
-/// - `flags`: Send flags
 /// - `raw_destination`: Pointer to destination address
-/// - `sendto_fn`: Platform-specific sendto function
 ///
 /// ## Returns
-/// `Detour<isize>`
+/// `Detour<INT>`
 #[cfg(windows)]
-#[mirrord_layer_macro::instrument(level = "debug", ret, skip(raw_message, destination, sendto_fn))]
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(call_original))]
 pub fn send_to<F>(
+    call_original: F,
     sockfd: SocketDescriptor,
-    raw_message: *const u8,
-    message_length: usize,
-    flags: i32,
     destination: SocketAddr,
-    sendto_fn: F,
-) -> HookResult<isize>
+) -> Detour<INT>
 where
-    F: FnOnce(SocketDescriptor, *const u8, usize, i32, SockAddr) -> HookResult<isize>,
+    F: FnOnce(SocketDescriptor, SockAddr) -> Detour<INT>,
 {
     let raw_destination = SockAddr::from(destination);
     trace!("destination {:?}", destination);
@@ -657,14 +654,14 @@ where
     let user_socket_info = SOCKETS
         .lock()?
         .remove(&sockfd)
-        .ok_or_else(|| HookError::SocketNotFound(sockfd))?;
+        .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
     // we don't support unix sockets which don't use `connect`
     #[cfg(unix)]
     if (raw_destination.is_unix() || user_socket_info.domain == AF_UNIX)
         && !matches!(user_socket_info.state, SocketState::Connected(_))
     {
-        return Err(HookError::UnsupportedSocketType);
+        return Detour::Bypass(Bypass::Domain(AF_UNIX));
     }
 
     // Currently this flow only handles DNS resolution.
@@ -685,28 +682,20 @@ where
         );
         let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
-        sendto_fn(
+        call_original(
             sockfd,
-            raw_message,
-            message_length,
-            flags,
             rawish_true_destination,
         )
     } else {
         // Note: temporary Detour workaround until send_to is cross-platform (WIN-85)
         // The current implementation will bypass any error returned.
-        match connect_outgoing_common(
+        connect_outgoing_common(
             sockfd,
             destination.into(),
             user_socket_info,
             NetProtocol::Datagrams,
             nop_connect_fn,
-        ) {
-            Detour::Success(..) => {}
-            _ => {
-                return Err(ConnectError::Fallback.into());
-            }
-        }
+        )?;
 
         let layer_address: SockAddr = SOCKETS
             .lock()?
@@ -719,7 +708,7 @@ where
             .try_into()?;
 
         // Convert Windows parameters to cross-platform format
-        sendto_fn(sockfd, raw_message, message_length, flags, layer_address)
+        call_original(sockfd, layer_address)
     }
 }
 
