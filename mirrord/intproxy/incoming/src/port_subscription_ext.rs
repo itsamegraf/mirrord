@@ -1,10 +1,17 @@
-//! Utilities for handling toggleable `steal` feature in [`IncomingProxy`](super::IncomingProxy).
+//! Utilities for handling incoming port subscriptions and listen-address resolution.
+
+use std::{
+    future::Future,
+    io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+};
 
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     ClientMessage, Port,
     tcp::{LayerTcp, LayerTcpSteal, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType},
 };
+use rand::seq::IndexedRandom;
 
 /// Retrieves subscribed port from the given [`StealType`].
 fn get_port(steal_type: &StealType) -> Port {
@@ -81,5 +88,50 @@ impl PortSubscriptionExt for PortSubscription {
                 ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(get_port(steal_type)))
             }
         }
+    }
+}
+
+/// Normalizes unspecified addresses (0.0.0.0, ::) to localhost for connection purposes.
+///
+/// This is needed because while servers can bind to unspecified addresses (meaning "listen on all
+/// interfaces"), clients need a specific address to connect to. Connecting to unspecified addresses
+/// can be problematic due to networking stack behavior and security policies.
+fn normalize_connection_address(listen_addr: SocketAddr) -> SocketAddr {
+    match listen_addr.ip() {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {
+            tracing::debug!("Converting IPv4 unspecified {} to localhost", listen_addr);
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_addr.port())
+        }
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED) => {
+            tracing::debug!("Converting IPv6 unspecified {} to localhost", listen_addr);
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), listen_addr.port())
+        }
+        _ => listen_addr,
+    }
+}
+
+/// Resolves `ListeningOn` values into a connectable socket address.
+pub trait ListeningOnExt {
+    fn resolve_addr(&self) -> impl Future<Output = io::Result<SocketAddr>>;
+}
+
+impl ListeningOnExt for mirrord_intproxy_protocol::ListeningOn {
+    async fn resolve_addr(&self) -> io::Result<SocketAddr> {
+        let addr = match self {
+            Self::Socket(addr) => *addr,
+            Self::Hostname { host, port } => {
+                let addrs = tokio::net::lookup_host((host.as_str(), *port))
+                    .await?
+                    .collect::<Vec<_>>();
+                *addrs.choose(&mut rand::rng()).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::AddrNotAvailable,
+                        format!("DNS lookup for {host}:{port} returned no addresses"),
+                    )
+                })?
+            }
+        };
+
+        Ok(normalize_connection_address(addr))
     }
 }

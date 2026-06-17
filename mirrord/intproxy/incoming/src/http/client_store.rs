@@ -19,7 +19,7 @@ use tokio_rustls::TlsStream;
 use tracing::Level;
 
 use super::{HttpSender, LocalHttpClient, LocalHttpError};
-use crate::proxies::incoming::tls::LocalTlsSetup;
+use crate::tls::LocalTlsSetup;
 
 /// Idle [`LocalHttpClient`] caches in [`ClientStore`].
 struct IdleLocalClient {
@@ -379,7 +379,7 @@ mod test {
     use tokio_rustls::TlsAcceptor;
 
     use super::ClientStore;
-    use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
+    use crate::{LocalTlsSetup, StreamingBody};
 
     /// Verifies that [`ClientStore`] cleans up unused connections.
     #[tokio::test]

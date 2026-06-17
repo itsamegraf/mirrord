@@ -9,11 +9,18 @@ use mirrord_protocol::{BlockedAction, ClientMessage, Port, RemoteResult, Respons
 use semver::Version;
 use tracing::Level;
 
-use super::{IncomingProxyError, port_subscription_ext::PortSubscriptionExt};
 use crate::{
-    main_tasks::{ProxyMessage, ToLayer},
+    error::IncomingProxyError, port_subscription_ext::PortSubscriptionExt,
     remote_resources::RemoteResources,
 };
+
+/// Message returned to the adapter when a layer should receive a response.
+#[derive(Debug)]
+pub struct ToLayer {
+    pub message_id: MessageId,
+    pub layer_id: LayerId,
+    pub message: ProxyToLayerMessage,
+}
 
 /// Represents a source of subscription - a `listen` call in the layer.
 #[derive(Debug)]
@@ -193,7 +200,7 @@ impl SubscriptionsManager {
         message_id: MessageId,
         request: PortSubscribe,
         protocol_version: Option<&Version>,
-    ) -> Option<Either<ProxyMessage, ClientMessage>> {
+    ) -> Option<Either<ToLayer, ClientMessage>> {
         self.remote_ports.add(
             layer_id,
             (request.subscription.port(), request.listening_on.clone()),
@@ -207,10 +214,7 @@ impl SubscriptionsManager {
         };
 
         match self.subscriptions.entry(port) {
-            Entry::Occupied(mut e) => e
-                .get_mut()
-                .push_source(source)
-                .map(|m| Either::Left(ProxyMessage::ToLayer(m))),
+            Entry::Occupied(mut e) => e.get_mut().push_source(source).map(Either::Left),
             Entry::Vacant(e) => {
                 let (subscription, message) = Subscription::new(source, protocol_version);
                 e.insert(subscription);

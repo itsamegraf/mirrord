@@ -9,6 +9,10 @@ use std::{
 
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, http::response::Parts};
+use mirrord_intproxy_incoming::{
+    ClientStore, HttpOut, InProxyTaskMessage, ListeningOnExt, LocalHttpError, ResponseMode,
+    StreamingBody, mirrord_error_response,
+};
 use mirrord_intproxy_protocol::ListeningOn;
 use mirrord_protocol::{
     ClientMessage, Payload,
@@ -23,11 +27,6 @@ use tokio::time;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::Level;
 
-use super::{
-    ListeningOnExt,
-    http::{ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response},
-    tasks::{HttpOut, InProxyTaskMessage},
-};
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
 /// [`BackgroundTask`] used by the [`IncomingProxy`](super::IncomingProxy).
@@ -467,6 +466,7 @@ mod test {
         upgrade::Upgraded,
     };
     use hyper_util::rt::TokioIo;
+    use mirrord_intproxy_incoming::{InProxyTaskError, LocalTlsSetup};
     use mirrord_protocol::{
         ConnectionId, ToPayload,
         tcp::{HttpRequest, InternalHttpRequest, TcpData},
@@ -487,11 +487,7 @@ mod test {
     use super::*;
     use crate::{
         background_tasks::{BackgroundTasks, TaskUpdate},
-        proxies::incoming::{
-            InProxyTaskError,
-            tcp_proxy::{LocalTcpConnection, TcpProxyTask},
-            tls::LocalTlsSetup,
-        },
+        proxies::incoming::tcp_proxy::{LocalTcpConnection, TcpProxyTask},
     };
 
     /// Binary protocol over TCP.

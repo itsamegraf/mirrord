@@ -3,6 +3,9 @@ use std::{io::ErrorKind, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 use bytes::BytesMut;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
+use mirrord_intproxy_incoming::{
+    BoundTcpSocket, InProxyTaskError, InProxyTaskMessage, LocalTlsSetup,
+};
 use mirrord_protocol::{
     ClientMessage, ConnectionId,
     tcp::{IncomingTrafficTransportType, LayerTcpSteal, TcpData},
@@ -16,11 +19,6 @@ use tokio::{
 use tokio_rustls::TlsStream;
 use tracing::Level;
 
-use super::{
-    bound_socket::BoundTcpSocket,
-    tasks::{InProxyTaskError, InProxyTaskMessage},
-    tls::LocalTlsSetup,
-};
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
 /// Local TCP connections between the [`TcpProxyTask`] and the user application.

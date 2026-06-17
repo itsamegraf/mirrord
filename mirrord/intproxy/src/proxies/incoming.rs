@@ -6,22 +6,17 @@
 //!    until connection becomes readable (is TCP) or receives an http request.
 //! 2. HttpSender -
 
-use std::{
-    collections::HashMap,
-    io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    ops::Not,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, io, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 
-use bound_socket::BoundTcpSocket;
 use futures::future::Either;
-use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use hyper::{HeaderMap, Method, Uri};
-use metadata_store::MetadataStore;
 use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
+use mirrord_intproxy_incoming::{
+    BoundTcpSocket, ClientStore, HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError,
+    InProxyTaskMessage, ListeningOnExt, LocalTlsSetup, MetadataStore, ResponseMode, StreamingBody,
+    SubscriptionsManager, mirrord_error_response,
+};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     ListeningOn, MessageId, PortSubscription, ProxyToLayerMessage,
@@ -35,16 +30,12 @@ use mirrord_protocol::{
         NewTcpConnectionV2,
     },
 };
-use rand::seq::IndexedRandom;
 use semver::Version;
-use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
 use thiserror::Error;
-use tls::LocalTlsSetup;
 use tokio::sync::mpsc;
 use tracing::Level;
 
-use self::subscriptions::SubscriptionsManager;
 use crate::{
     ProxyMessage,
     background_tasks::{
@@ -54,17 +45,10 @@ use crate::{
     session_monitor::{MonitorEvent, MonitorTx},
 };
 
-mod bound_socket;
-pub mod http;
 mod http_gateway;
-mod metadata_store;
-pub mod port_subscription_ext;
-mod subscriptions;
-pub mod tasks;
 mod tcp_proxy;
 #[cfg(test)]
 mod tests;
-pub mod tls;
 
 /// Maps IDs of remote connections to `T`.
 ///
@@ -107,6 +91,22 @@ pub enum IncomingProxyError {
 
     #[error("HTTP method filter is not supported for this protocol version {0:?}!")]
     HttpMethodFilterNotSupported(Option<Version>),
+}
+
+impl From<mirrord_intproxy_incoming::IncomingProxyError> for IncomingProxyError {
+    fn from(value: mirrord_intproxy_incoming::IncomingProxyError) -> Self {
+        match value {
+            mirrord_intproxy_incoming::IncomingProxyError::SubscriptionFailed(err) => {
+                Self::SubscriptionFailed(err)
+            }
+            mirrord_intproxy_incoming::IncomingProxyError::SocketSetupFailed(err) => {
+                Self::SocketSetupFailed(err)
+            }
+            mirrord_intproxy_incoming::IncomingProxyError::HttpMethodFilterNotSupported(
+                version,
+            ) => Self::HttpMethodFilterNotSupported(version),
+        }
+    }
 }
 
 /// Messages consumed by [`IncomingProxy`] running as a [`BackgroundTask`].
@@ -297,7 +297,7 @@ impl IncomingProxy {
             );
 
             if is_steal {
-                let response = http::mirrord_error_response(
+                let response = mirrord_error_response(
                     "port no longer subscribed with an HTTP filter",
                     request.version(),
                     request.connection_id,
@@ -702,7 +702,13 @@ impl IncomingProxy {
                 let msgs = self.subscriptions.agent_responded(result)?;
 
                 for msg in msgs {
-                    message_bus.send(msg).await;
+                    message_bus
+                        .send(ProxyMessage::ToLayer(ToLayer {
+                            message_id: msg.message_id,
+                            layer_id: msg.layer_id,
+                            message: msg.message,
+                        }))
+                        .await;
                 }
             }
         }
@@ -727,7 +733,15 @@ impl IncomingProxy {
                         self.protocol_version.as_ref(),
                     );
                     match msg {
-                        Some(Either::Left(m)) => message_bus.send(m).await,
+                        Some(Either::Left(m)) => {
+                            message_bus
+                                .send(ProxyMessage::ToLayer(ToLayer {
+                                    message_id: m.message_id,
+                                    layer_id: m.layer_id,
+                                    message: m.message,
+                                }))
+                                .await
+                        }
                         Some(Either::Right(m)) => message_bus.send_agent(m).await,
                         None => (),
                     };
@@ -743,13 +757,13 @@ impl IncomingProxy {
                 IncomingRequest::ConnMetadata(req) => {
                     let res = self.metadata_store.get(req);
                     message_bus
-                        .send(ToLayer {
+                        .send(ProxyMessage::ToLayer(ToLayer {
                             message_id,
                             layer_id,
                             message: ProxyToLayerMessage::Incoming(IncomingResponse::ConnMetadata(
                                 res,
                             )),
-                        })
+                        }))
                         .await;
                 }
             },
@@ -906,7 +920,7 @@ impl IncomingProxy {
                         );
 
                         if respond_on_panic {
-                            let response = http::mirrord_error_response(
+                            let response = mirrord_error_response(
                                 "HTTP gateway task panicked",
                                 id.version,
                                 id.connection_id,
@@ -998,60 +1012,5 @@ impl BackgroundTask for IncomingProxy {
                 },
             }
         }
-    }
-}
-
-/// Normalizes unspecified addresses (0.0.0.0, ::) to localhost for connection purposes.
-///
-/// This is needed because while servers can bind to unspecified addresses (meaning "listen on all
-/// interfaces"), clients need a specific address to connect to. Connecting to unspecified addresses
-/// can be problematic due to networking stack behavior and security policies.
-fn normalize_connection_address(listen_addr: SocketAddr) -> SocketAddr {
-    match listen_addr.ip() {
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {
-            tracing::debug!("Converting IPv4 unspecified {} to localhost", listen_addr);
-            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_addr.port())
-        }
-        IpAddr::V6(Ipv6Addr::UNSPECIFIED) => {
-            tracing::debug!("Converting IPv6 unspecified {} to localhost", listen_addr);
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), listen_addr.port())
-        }
-        _ => listen_addr,
-    }
-}
-
-pub trait ListeningOnExt {
-    /// Returns a concrete, connectable [`SocketAddr`] to forward traffic to.
-    ///
-    /// For [`ListeningOn::Hostname`], resolves it via DNS and picks one of the returned addresses
-    /// at random. Call this per request / per new connection so load gets spread across the
-    /// backing pods of a headless Service.
-    ///
-    /// The returned address is always connectable: a wildcard listen address (`0.0.0.0` / `::`) is
-    /// normalized to loopback (see [`normalize_connection_address`]). Centralizing that here keeps
-    /// every caller on a connectable address — the raw-TCP and HTTP-gateway paths drifted apart
-    /// once (regressed in #4264, restored in #4302), and folding it in is what stops that
-    /// recurring.
-    fn resolve_addr(&self) -> impl Future<Output = io::Result<SocketAddr>>;
-}
-
-impl ListeningOnExt for ListeningOn {
-    async fn resolve_addr(&self) -> io::Result<SocketAddr> {
-        let addr = match self {
-            Self::Socket(addr) => *addr,
-            Self::Hostname { host, port } => {
-                let addrs = tokio::net::lookup_host((host.as_str(), *port))
-                    .await?
-                    .collect::<Vec<_>>();
-                *addrs.choose(&mut rand::rng()).ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::AddrNotAvailable,
-                        format!("DNS lookup for {host}:{port} returned no addresses"),
-                    )
-                })?
-            }
-        };
-
-        Ok(normalize_connection_address(addr))
     }
 }

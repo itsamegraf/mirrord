@@ -5042,6 +5042,7 @@ dependencies = [
  "hyper-util",
  "mirrord-analytics",
  "mirrord-config",
+ "mirrord-intproxy-incoming",
  "mirrord-intproxy-protocol",
  "mirrord-kube",
  "mirrord-operator",
@@ -5053,7 +5054,6 @@ dependencies = [
  "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "rand 0.9.2",
- "rcgen",
  "rstest",
  "rustls",
  "semver 1.0.27",
@@ -5071,6 +5071,35 @@ dependencies = [
  "tokio-util",
  "tracing",
  "winapi",
+]
+
+[[package]]
+name = "mirrord-intproxy-incoming"
+version = "3.217.1"
+dependencies = [
+ "bytes",
+ "futures",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "mirrord-config",
+ "mirrord-intproxy-protocol",
+ "mirrord-protocol",
+ "mirrord-tls-util",
+ "rand 0.9.2",
+ "rcgen",
+ "rstest",
+ "rustls",
+ "semver 1.0.27",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-retry",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

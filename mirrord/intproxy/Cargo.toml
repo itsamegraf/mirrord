@@ -24,6 +24,7 @@ mirrord-kube = { path = "../kube", features = ["portforward"] }
 mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-protocol = { path = "../protocol" }
 mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
+mirrord-intproxy-incoming = { path = "./incoming" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-progress = { path = "../progress" }
@@ -60,7 +61,6 @@ winapi = { workspace = true }
 tokio-seqpacket.workspace = true
 
 [dev-dependencies]
-rcgen.workspace = true
 rstest.workspace = true
 mirrord-session-monitor-client.workspace = true
 futures.workspace = true
