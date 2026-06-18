@@ -8,6 +8,7 @@
 members = [
     "mirrord/*",
     "mirrord/intproxy/incoming",
+    "mirrord/intproxy/remote",
     "mirrord/layer/core",
     "mirrord/layer/remote",
     "mirrord/agent/env",

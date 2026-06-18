@@ -5113,6 +5113,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-intproxy-remote"
+version = "3.217.1"
+dependencies = [
+ "mirrord-intproxy",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "mirrord-jaq"
 version = "3.217.1"
 dependencies = [

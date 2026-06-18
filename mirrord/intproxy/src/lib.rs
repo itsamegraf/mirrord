@@ -61,6 +61,7 @@ mod layer_initializer;
 pub mod main_tasks;
 pub mod ping_pong;
 pub mod proxies;
+pub mod remote;
 mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
