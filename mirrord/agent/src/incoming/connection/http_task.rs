@@ -189,10 +189,7 @@ impl HttpTask<PassthroughConnection> {
     where
         B: 'static + Body<Data = Bytes, Error = hyper::Error> + Send + Unpin,
     {
-        let stream = TcpStream::connect(info.pass_through_address())
-            .await
-            .map_err(From::from)
-            .map_err(ConnError::TcpConnectError)?;
+        let stream = info.connect_pass_through().await?;
 
         let stream = match &info.tls_connector {
             Some(connector) => {

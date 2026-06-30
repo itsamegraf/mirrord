@@ -180,10 +180,7 @@ impl RedirectedTcp {
     }
 
     async fn make_pass_through_connection(&self) -> Result<MaybeTls, ConnError> {
-        let tcp_stream = TcpStream::connect(self.info.pass_through_address())
-            .await
-            .map_err(From::from)
-            .map_err(ConnError::TcpConnectError)?;
+        let tcp_stream = self.info.connect_pass_through().await?;
 
         match &self.info.tls_connector {
             Some(tls_connector) => {
