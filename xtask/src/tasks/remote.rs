@@ -8,25 +8,26 @@ use anyhow::{Context, Result};
 use super::{layer::Target, release::Platform};
 use crate::relative_to_root;
 
-pub fn build_serverless_bootstrap(
+pub fn build_remote_bootstrap(
     platform: Platform,
     release: bool,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
-    println!("Building mirrord serverless bootstrap...");
+    println!("Building mirrord remote bootstrap...");
 
     let target = match platform {
         Platform::LinuxX86_64 => Target::LinuxX86_64,
         Platform::LinuxAarch64 => Target::LinuxAarch64,
-        _ => anyhow::bail!("serverless bootstrap can only be built for Linux targets"),
+        _ => anyhow::bail!("mirrord remote bootstrap can only be built for Linux targets"),
     };
 
     let mode = if release { "release" } else { "debug" };
     let agent_binary = build_agent_binary(target, release, cargo_args)?;
+    let remote_layer_binary = build_remote_layer_binary(target, release, cargo_args)?;
 
     let mut cmd = Command::new("cargo");
     cmd.arg("build");
-    cmd.arg("-p").arg("mirrord-serverless-bootstrap");
+    cmd.arg("-p").arg("mirrord-remote-bootstrap");
 
     if release {
         cmd.arg("--release");
@@ -40,28 +41,37 @@ pub fn build_serverless_bootstrap(
             .canonicalize()
             .context("Failed to canonicalize mirrord-agent binary path")?,
     );
+    cmd.env(
+        "MIRRORD_REMOTE_LAYER_BINARY",
+        remote_layer_binary
+            .canonicalize()
+            .context("Failed to canonicalize mirrord remote layer binary path")?,
+    );
     cmd.args(cargo_args);
 
     let status = cmd.status().context("Failed to run cargo build")?;
 
     if !status.success() {
-        anyhow::bail!("cargo build failed for mirrord-serverless-bootstrap");
+        anyhow::bail!("cargo build failed for mirrord-remote");
     }
 
     let bootstrap_path = relative_to_root(
         Path::new("target")
             .join(target_triple)
             .join(mode)
-            .join("libmirrord_serverless_bootstrap.so")
+            .join("libmirrord_remote_bootstrap.so")
             .as_path(),
     );
 
-    println!("✓ Serverless bootstrap built: {}", bootstrap_path.display());
+    println!(
+        "✓ mirrord-remote-bootstrap built: {}",
+        bootstrap_path.display()
+    );
     Ok(bootstrap_path)
 }
 
 fn build_agent_binary(target: Target, release: bool, cargo_args: &[String]) -> Result<PathBuf> {
-    println!("Building mirrord-agent for serverless bootstrap...");
+    println!("Building mirrord-agent for mirrord remote bootstrap...");
 
     let mut cmd = Command::new("cargo");
     cmd.arg("build");
@@ -90,6 +100,47 @@ fn build_agent_binary(target: Target, release: bool, cargo_args: &[String]) -> R
             .as_path(),
     );
 
-    println!("✓ Agent built: {}", agent_binary.display());
+    println!("✓ mirrord-agent built: {}", agent_binary.display());
     Ok(agent_binary)
+}
+
+fn build_remote_layer_binary(
+    target: Target,
+    release: bool,
+    cargo_args: &[String],
+) -> Result<PathBuf> {
+    println!("Building mirrord-remote-layer for mirrord remote bootstrap...");
+
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build");
+    cmd.arg("-p").arg("mirrord-remote-layer");
+
+    if release {
+        cmd.arg("--release");
+    }
+
+    let target_triple = target.triple();
+    cmd.arg("--target").arg(target_triple);
+    cmd.args(cargo_args);
+
+    let status = cmd.status().context("Failed to run cargo build")?;
+
+    if !status.success() {
+        anyhow::bail!("cargo build failed for mirrord-remote-layer");
+    }
+
+    let mode = if release { "release" } else { "debug" };
+    let remote_layer_binary = relative_to_root(
+        Path::new("target")
+            .join(target_triple)
+            .join(mode)
+            .join("libmirrord_remote_layer.so")
+            .as_path(),
+    );
+
+    println!(
+        "✓ mirrord-remote-layer built: {}",
+        remote_layer_binary.display()
+    );
+    Ok(remote_layer_binary)
 }

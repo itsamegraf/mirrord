@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-serverless-bootstrap"
+name = "mirrord-remote-bootstrap"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -17,10 +17,12 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-layer-lib = { path = "../layer-lib" }
-
+libc.workspace = true
+mirrord-layer-lib = { path = "../../layer-lib" }
+mirrord-remote-layer-protocol = { path = "../layer/protocol" }
 ctor.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
