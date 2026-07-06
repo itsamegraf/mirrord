@@ -208,7 +208,6 @@ impl MirrordExecution {
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
-        is_bridge_mode: bool,
     ) -> CliResult<Self>
     where
         P: Progress,
@@ -245,7 +244,6 @@ impl MirrordExecution {
                         progress,
                         analytics,
                         mirrord_for_ci,
-                        is_bridge_mode,
                     ))
                     .await?
                 }
@@ -398,16 +396,9 @@ impl MirrordExecution {
             info: connect_info,
             mut connection,
             api_version,
-        } = create_and_connect(
-            config,
-            progress,
-            analytics,
-            branch_name,
-            mirrord_for_ci,
-            false,
-        )
-        .await
-        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        } = create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
@@ -527,7 +518,6 @@ impl MirrordExecution {
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
-        is_bridge_mode: bool,
     ) -> CliResult<(HashMap<String, String>, Option<Child>, bool)>
     where
         P: Progress,
@@ -537,16 +527,9 @@ impl MirrordExecution {
             info: connect_info,
             mut connection,
             api_version,
-        } = create_and_connect(
-            config,
-            progress,
-            analytics,
-            branch_name,
-            mirrord_for_ci,
-            is_bridge_mode,
-        )
-        .await
-        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        } = create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let agent_protocol_version = match &connect_info {
             AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),

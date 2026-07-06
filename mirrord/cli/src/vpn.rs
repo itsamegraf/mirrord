@@ -49,7 +49,6 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
         &mut analytics,
         branch_name,
         None,
-        false,
     )
     .await
     .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;

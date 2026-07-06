@@ -30,7 +30,6 @@ where
         &mut progress,
         analytics,
         None,
-        false,
     )
     .await?;
 
