@@ -1,4 +1,8 @@
 {
+  "target": {
+    "serverless": "demo-tenant",
+    "container": "demo-target"
+  },
   "agent": {
     "clean_iptables_on_start": false
   },
@@ -10,7 +14,12 @@
     "fs": "read",
     "network": {
       "outgoing": true,
-      "incoming": "off",
+      "incoming": {
+        "mode": "steal",
+        "http_filter": {
+          "header_filter": "^baggage: .*mirrord-session=daniel.*$"
+        }
+      },
       "dns": {
         "enabled": true,
         "filter": {
