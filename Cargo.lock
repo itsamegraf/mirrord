@@ -4897,6 +4897,7 @@ dependencies = [
  "mirrord-agent-iptables",
  "mirrord-protocol",
  "mirrord-protocol-io",
+ "mirrord-remote-layer-protocol",
  "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix 0.29.0",
@@ -5178,6 +5179,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
@@ -5199,6 +5201,16 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "mirrord-layer-core"
+version = "3.229.0"
+dependencies = [
+ "frida-gum",
+ "libc",
+ "mirrord-layer-lib",
+ "tracing",
 ]
 
 [[package]]
@@ -5419,11 +5431,43 @@ dependencies = [
 ]
 
 [[package]]
-name = "mirrord-serverless-bootstrap"
+name = "mirrord-remote-bootstrap"
 version = "3.229.0"
 dependencies = [
  "ctor",
+ "libc",
  "mirrord-layer-lib",
+ "mirrord-remote-layer-protocol",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-remote-layer"
+version = "3.229.0"
+dependencies = [
+ "ctor",
+ "libc",
+ "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
+ "mirrord-layer-lib",
+ "mirrord-layer-macro",
+ "mirrord-remote-layer-protocol",
+ "nix 0.29.0",
+ "socket2 0.5.10",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-remote-layer-protocol"
+version = "3.229.0"
+dependencies = [
+ "bincode",
+ "mirrord-intproxy-protocol",
+ "nix 0.29.0",
+ "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 
