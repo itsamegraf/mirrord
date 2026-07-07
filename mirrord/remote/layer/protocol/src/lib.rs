@@ -7,7 +7,7 @@ pub mod error;
 
 pub use connection_handoff::{
     CONNECTION_HANDOFF_SOCKET_ENV, ConnectionHandoff, ConnectionHandoffServer,
-    handle_connection_handoff_connection,
+    RemoteLayerSubscriptionsView, handle_connection_handoff_connection,
 };
 
 /// Metadata sent alongside a transferred accepted socket fd on the connection handoff side channel.

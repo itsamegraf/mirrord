@@ -1,7 +1,6 @@
 {
   "target": {
-    "serverless": "demo-tenant",
-    "container": "demo-target"
+    "path": "serverless/demo-tenant/container/demo-target"
   },
   "agent": {
     "clean_iptables_on_start": false

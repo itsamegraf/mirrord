@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     io::{Cursor, Error, ErrorKind, Read, Write},
     mem::ManuallyDrop,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream as StdTcpStream},
@@ -7,6 +8,7 @@ use std::{
         net::UnixStream,
     },
     path::PathBuf,
+    sync::{Arc, Mutex},
 };
 
 use tokio::net::{
@@ -22,6 +24,23 @@ pub const CONNECTION_HANDOFF_SOCKET_ENV: &str = "MIRRORD_REMOTE_HANDOFF_SOCKET";
 
 /// Default location of the connection handoff socket. see [`CONNECTION_HANDOFF_SOCKET_ENV`]
 const DEFAULT_CONNECTION_HANDOFF_SOCKET: &str = "/tmp/mirrord-remote-handoff.sock";
+
+/// Shared read-only view of the destination ports currently subscribed for remote-layer traffic.
+#[derive(Clone, Debug)]
+pub struct RemoteLayerSubscriptionsView(Arc<Mutex<HashSet<u16>>>);
+
+impl RemoteLayerSubscriptionsView {
+    pub fn new(subscriptions: Arc<Mutex<HashSet<u16>>>) -> Self {
+        Self(subscriptions)
+    }
+
+    pub fn contains(&self, port: u16) -> bool {
+        self.0
+            .lock()
+            .expect("remote-layer subscription lock failed")
+            .contains(&port)
+    }
+}
 
 /// Owns the Unix listener used for connection handoff traffic.
 pub struct ConnectionHandoffServer {
@@ -63,14 +82,19 @@ impl ConnectionHandoffServer {
 
 pub async fn handle_connection_handoff_connection(
     stream: TokioUnixStream,
-) -> Result<ConnectionHandoff> {
+    subscriptions: RemoteLayerSubscriptionsView,
+) -> Result<Option<ConnectionHandoff>> {
     let unix_stream = stream.into_std()?;
     let ReceivedConnectionHandoff {
         request,
         accepted_fd,
     } = receive_connection_handoff_with_fd(&unix_stream)?;
-    let local_address = socket_local_addr(accepted_fd)?;
 
+    // Take ownership of the transferred raw fd so this function controls when it is closed
+    // and we do not leak the accepted socket.
+    let std_stream = unsafe { StdTcpStream::from_raw_fd(accepted_fd) };
+
+    let local_address = socket_local_addr(accepted_fd)?;
     if local_address != request.local_address {
         tracing::trace!(
             accept_id = request.accept_id,
@@ -80,7 +104,19 @@ pub async fn handle_connection_handoff_connection(
         );
     }
 
-    let std_stream = unsafe { StdTcpStream::from_raw_fd(accepted_fd) };
+    // If the agent is not listening on this port, tell the layer to keep the socket
+    // locally instead of creating a placeholder listener for it.
+    if !subscriptions.contains(request.listener_address.port()) {
+        send_connection_handoff_response(
+            &unix_stream,
+            &request,
+            RemoteAcceptVerdict::Decline,
+            local_address,
+        )?;
+
+        return Ok(None);
+    }
+
     std_stream.set_nonblocking(true)?;
     let original_stream = TokioTcpStream::from_std(std_stream)?;
 
@@ -100,11 +136,11 @@ pub async fn handle_connection_handoff_connection(
         passthrough_stream
     };
 
-    Ok(ConnectionHandoff {
+    Ok(Some(ConnectionHandoff {
         original_stream,
         info: request,
         passthrough_stream,
-    })
+    }))
 }
 
 impl Drop for ConnectionHandoffServer {

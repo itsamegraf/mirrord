@@ -2,9 +2,10 @@ use std::{
     collections::{HashSet, VecDeque},
     error::Error,
     fmt, io,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
+use mirrord_remote_layer_protocol::RemoteLayerSubscriptionsView;
 use tokio::sync::mpsc;
 use tracing::trace;
 
@@ -13,38 +14,11 @@ use crate::incoming::{PortRedirector, Redirected};
 /// Sender used by the sidecar bridge/router to inject bridged connections into the existing
 /// incoming pipeline.
 #[derive(Clone, Debug)]
-pub(crate) struct BridgeIngressTx {
+pub(crate) struct IncomingConnectionSender {
     tx: mpsc::Sender<Redirected>,
 }
 
-#[derive(Debug)]
-pub struct BridgeRedirectorError(Box<dyn Error + Send + Sync + 'static>);
-
-impl fmt::Display for BridgeRedirectorError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl Error for BridgeRedirectorError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.0.source()
-    }
-}
-
-impl From<io::Error> for BridgeRedirectorError {
-    fn from(value: io::Error) -> Self {
-        Self(Box::new(value))
-    }
-}
-
-impl From<BridgeRedirectorError> for Arc<dyn Error + Send + Sync + 'static> {
-    fn from(value: BridgeRedirectorError) -> Self {
-        value.0.into()
-    }
-}
-
-impl BridgeIngressTx {
+impl IncomingConnectionSender {
     pub(crate) async fn send(
         &self,
         conn: Redirected,
@@ -54,26 +28,55 @@ impl BridgeIngressTx {
     }
 }
 
+#[derive(Debug)]
+pub struct RemoteLayerPortRedirectorError(Box<dyn Error + Send + Sync + 'static>);
+
+impl fmt::Display for RemoteLayerPortRedirectorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Error for RemoteLayerPortRedirectorError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.0.source()
+    }
+}
+
+impl From<io::Error> for RemoteLayerPortRedirectorError {
+    fn from(value: io::Error) -> Self {
+        Self(Box::new(value))
+    }
+}
+
+impl From<RemoteLayerPortRedirectorError> for Arc<dyn Error + Send + Sync + 'static> {
+    fn from(value: RemoteLayerPortRedirectorError) -> Self {
+        value.0.into()
+    }
+}
+
 /// [`PortRedirector`] implementation that receives redirected connections from the sidecar bridge
 /// instead of from iptables.
 #[derive(Debug)]
-pub(crate) struct BridgeRedirector {
+pub(crate) struct RemoteLayerPortRedirector {
     rx: mpsc::Receiver<Redirected>,
-    subscriptions: HashSet<u16>,
+    subscriptions: Arc<Mutex<HashSet<u16>>>,
     pending: VecDeque<Redirected>,
 }
 
-impl BridgeRedirector {
-    pub fn new() -> (Self, BridgeIngressTx) {
+impl RemoteLayerPortRedirector {
+    pub fn new() -> (Self, IncomingConnectionSender, RemoteLayerSubscriptionsView) {
         let (tx, rx) = mpsc::channel(32);
+        let subscriptions = Arc::new(Mutex::new(HashSet::new()));
 
         (
             Self {
                 rx,
-                subscriptions: HashSet::new(),
+                subscriptions: Arc::clone(&subscriptions),
                 pending: VecDeque::new(),
             },
-            BridgeIngressTx { tx },
+            IncomingConnectionSender { tx },
+            RemoteLayerSubscriptionsView::new(subscriptions),
         )
     }
 
@@ -85,10 +88,15 @@ impl BridgeRedirector {
                 break;
             };
 
-            if self.subscriptions.contains(&conn.destination().port()) {
+            let subscriptions = self
+                .subscriptions
+                .lock()
+                .expect("remote-layer subscription lock failed");
+            if subscriptions.contains(&conn.destination().port()) {
                 return Some(conn);
             }
 
+            drop(subscriptions);
             self.pending.push_back(conn);
         }
 
@@ -96,21 +104,30 @@ impl BridgeRedirector {
     }
 }
 
-impl PortRedirector for BridgeRedirector {
-    type Error = BridgeRedirectorError;
+impl PortRedirector for RemoteLayerPortRedirector {
+    type Error = RemoteLayerPortRedirectorError;
 
     async fn add_redirection(&mut self, from_port: u16) -> Result<(), Self::Error> {
-        self.subscriptions.insert(from_port);
+        self.subscriptions
+            .lock()
+            .expect("remote-layer subscription lock failed")
+            .insert(from_port);
         Ok(())
     }
 
     async fn remove_redirection(&mut self, from_port: u16) -> Result<(), Self::Error> {
-        self.subscriptions.remove(&from_port);
+        self.subscriptions
+            .lock()
+            .expect("remote-layer subscription lock failed")
+            .remove(&from_port);
         Ok(())
     }
 
     async fn cleanup(&mut self) -> Result<(), Self::Error> {
-        self.subscriptions.clear();
+        self.subscriptions
+            .lock()
+            .expect("remote-layer subscription lock failed")
+            .clear();
         self.pending.clear();
         Ok(())
     }
@@ -128,7 +145,7 @@ impl PortRedirector for BridgeRedirector {
                         return Ok(conn);
                     }
 
-                    return Err(BridgeRedirectorError::from(io::Error::new(
+                    return Err(RemoteLayerPortRedirectorError::from(io::Error::new(
                         io::ErrorKind::BrokenPipe,
                         "bridge ingress channel closed",
                     )));

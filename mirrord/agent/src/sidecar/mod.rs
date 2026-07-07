@@ -1,3 +1,3 @@
 mod incoming;
 
-pub(crate) use incoming::{BridgeIngressTx, BridgeRedirector};
+pub(crate) use incoming::{IncomingConnectionSender, RemoteLayerPortRedirector};

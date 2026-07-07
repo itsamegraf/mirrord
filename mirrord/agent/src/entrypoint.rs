@@ -1168,8 +1168,8 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
         });
     }
 
-    let (steal_handle, mirror_handle, bridge_ingress_tx) =
-        setup::start_bridge_ingress(&network_runtime).await?;
+    let (steal_handle, mirror_handle, incoming_connection_sender, subscriptions) =
+        setup::start_remote_layer_ingress(&network_runtime).await?;
     let stealer = setup::start_stealer(
         &state.network_runtime,
         steal_handle,
@@ -1234,13 +1234,21 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
                 match remote_accept_result {
                     Ok((stream, peer)) => {
                         tracing::trace!(peer = ?peer, "accepted connection handoff connection");
-                        let bridge_ingress_tx = bridge_ingress_tx.clone();
+                        let incoming_connection_sender = incoming_connection_sender.clone();
+                        let subscriptions = subscriptions.clone();
                         join_set.spawn(async move {
-                            match handle_connection_handoff_connection(stream).await {
-                                Ok(conn_handoff) => {
-                                    if let Err(error) = bridge_ingress_tx.send(conn_handoff.into()).await {
+                            match handle_connection_handoff_connection(
+                                stream,
+                                subscriptions,
+                            )
+                            .await {
+                                Ok(Some(conn_handoff)) => {
+                                    if let Err(error) = incoming_connection_sender.send(conn_handoff.into()).await {
                                         tracing::error!(%error, "bridge ingress channel closed");
                                     }
+                                }
+                                Ok(None) => {
+                                    tracing::trace!("declined remote accept handoff");
                                 }
                                 Err(error) => {
                                     tracing::error!(%error, "connection handoff handling failed");
