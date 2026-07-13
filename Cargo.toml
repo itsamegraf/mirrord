@@ -293,7 +293,7 @@ yamlpath = "0.32.0"
 rust_socketio = {
     git = "https://github.com/metalbear-co/rust-socketio.git",
     # HEAD of branch mb-develop
-    rev = "f3a4e2f23b88283cb2cd5c634ed98e6a03c41ae3",
+    rev = "c2157e359e1b0a8f5d96e3b366caeb57feefe7f1",
     default-features = false,
     features = ["async", "rustls-tls-native-roots"]
 }

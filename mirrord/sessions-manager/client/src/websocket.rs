@@ -22,6 +22,7 @@ use tokio_tungstenite::{
     WebSocketStream,
     tungstenite::{self, Message},
 };
+use tokio_util::bytes::Bytes;
 
 /// A structural network bridge that wraps a [`WebSocketStream`] to support concurrent
 /// reading and writing without state deadlocks.
@@ -50,7 +51,7 @@ where
     read_half: SplitStream<WebSocketStream<S>>,
     /// A non-blocking, memory-buffered channel transmitter used to dispatch asynchronous outbound
     /// frames.
-    write_tx: mpsc::UnboundedSender<Vec<u8>>,
+    write_tx: mpsc::UnboundedSender<Bytes>,
     _marker: PhantomData<E>,
 }
 
@@ -68,14 +69,14 @@ where
     /// * `stream` - The active, handshaked [`WebSocketStream`] instance to bridge.
     pub fn new(stream: WebSocketStream<S>) -> Self {
         let (mut ws_sink, ws_stream) = stream.split();
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
 
         // Spawn a decoupled background worker loop utilizing non-blocking pipeline feeding
         tokio::spawn(async move {
             while let Some(bytes) = rx.recv().await {
                 // .feed() inserts the frame into the sink's underlying encoder
                 // buffer without blocking execution to wait for a network-level TCP flush!
-                if ws_sink.feed(Message::Binary(bytes)).await.is_err() {
+                if ws_sink.feed(Message::Binary(bytes.into())).await.is_err() {
                     break;
                 }
 
@@ -194,21 +195,21 @@ pub trait ToWebSocketMessage {
 
 impl ToWebSocketMessage for Vec<u8> {
     fn to_websocket_msg(self) -> Result<Message, WebSocketConnectionError> {
-        Ok(Message::Binary(self))
+        Ok(Message::Binary(self.into()))
     }
 }
 
 impl ToWebSocketMessage for ClientMessage {
     fn to_websocket_msg(self) -> Result<Message, WebSocketConnectionError> {
         let bytes = bincode::encode_to_vec(&self, bincode::config::standard())?;
-        Ok(Message::Binary(bytes))
+        bytes.to_websocket_msg()
     }
 }
 
 impl ToWebSocketMessage for DaemonMessage {
     fn to_websocket_msg(self) -> Result<Message, WebSocketConnectionError> {
         let bytes = bincode::encode_to_vec(&self, bincode::config::standard())?;
-        Ok(Message::Binary(bytes))
+        bytes.to_websocket_msg()
     }
 }
 
