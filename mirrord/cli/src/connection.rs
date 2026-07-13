@@ -26,6 +26,7 @@ use mirrord_progress::{
     utm_medium,
 };
 use mirrord_protocol_io::{Client, Connection};
+use mirrord_sessions_manager_client::connection::SessionsManagerClient;
 use tracing::Level;
 
 use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
@@ -212,11 +213,13 @@ pub(crate) struct ConnectData {
     pub(crate) api_version: (u16, u16),
 }
 
-/// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
+/// 1. if [`LayerConfig`] targets Serverless, makes a connection to an existing agent through
+///    mirrord-sessions-manager-client.
+/// 2. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
-/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
+/// 3. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
 ///    mirrord-agent and runs session without the mirrord-operator.
-/// 3. Otherwise, attempts to use the mirrord-operator and falls back to OSS flow in case
+/// 4. Otherwise, attempts to use the mirrord-operator and falls back to OSS flow in case
 ///    mirrord-operator is not found or its license is invalid.
 ///
 /// Here is where we start interactions with the kubernetes API.
@@ -228,6 +231,19 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
 ) -> CliResult<ConnectData> {
+    if let Some(Target::Serverless(target)) = &config.target.path {
+        let room_id = target.sessions_manager_room_id()?;
+        let conn = SessionsManagerClient::<Client>::new(&room_id, None)
+            .connect_oneshot(Duration::from_mins(10))
+            .await?;
+        return Ok(ConnectData {
+            info: AgentConnectInfo::SessionsManager { room_id },
+            connection: conn,
+            // Implement - see MBE-1981
+            api_version: (0, 0),
+        });
+    }
+
     if let Some((connection, api_version)) =
         try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {
