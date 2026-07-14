@@ -101,6 +101,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
+            Target::Serverless(target) => ("serverless", &target.serverless, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
         };
 
