@@ -1,0 +1,20 @@
+{
+  "target": {
+    "path": "serverless/demo-service",
+    "namespace": "demo-env"
+  },
+  "key": "demo-serverless",
+  "feature": {
+    "fs": "read",
+    "env": true,
+    "network": {
+      "outgoing": true,
+      "incoming": {
+        "mode": "steal",
+        "http_filter": {
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
+        }
+      }
+    }
+  }
+}
