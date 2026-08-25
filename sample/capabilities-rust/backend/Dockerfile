@@ -1,4 +1,4 @@
-FROM rust:1.88-bookworm AS builder
+FROM ghcr.io/metalbear-co/ci-agent-build:latest AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.toml
