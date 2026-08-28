@@ -326,7 +326,7 @@ rust_socketio = {
     # HEAD of branch mb-develop
     rev = "c2157e359e1b0a8f5d96e3b366caeb57feefe7f1",
     default-features = false,
-    features = ["async", "rustls-tls-native-roots"]
+    features = ["async", "rustls-tls-webpki-roots"]
 }
 
 [workspace.lints.rustdoc]
