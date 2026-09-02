@@ -1,31 +1,43 @@
 services:
-  # # FALLBACK: if aws is not available - uncomment to demo against local dockerfile:
-  # # Remote mirrord backend instance: this container does not expose its port to
-  # # localhost, and it runs with the mirrord remote stack.
+  # Fallback for running the remote stack locally without AWS.
+  # Build locally:
+  # * with Docker Buildx:
+  # RELEASE=0 PLATFORMS=linux/arm64 docker buildx bake -f ci/docker-bake.hcl remote-bootstrap --load
+  #
+  # * If Docker Buildx Bake is unavailable, build the same target directly:
+  # docker build --platform linux/arm64 --build-arg RELEASE=0 --file mirrord/agent/Dockerfile \
+  #   --target remote-bootstrap --tag ghcr.io/metalbear-co/mirrord-remote-bootstrap:dev .
+  #
+  # Use linux/amd64 instead when that matches the local container runtime.
+  install-mirrord-remote-bootstrap:
+    image: ghcr.io/metalbear-co/mirrord-remote-bootstrap:dev
+    pull_policy: never
+    command:
+      - /bin/sh
+      - -c
+      - cp /opt/mirrord/lib/libmirrord_remote_bootstrap.so /mirrord/libmirrord_remote_bootstrap.so
+    volumes:
+      - mirrord-bootstrap:/mirrord
+
   backend-mirrord-remote:
-    image: capabilities-rust-backend:mirrord-remote
-    # build:
-    #   context: .
-    #   dockerfile: backend/Dockerfile
-    #   target: mirrord-remote
-    #   args:
-    #     - RELEASE=0
+    image: capabilities-rust-backend:latest
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
     depends_on:
-      - mirrord-deps-builder-remote
+      install-mirrord-remote-bootstrap:
+        condition: service_completed_successfully
     environment:
-      - MIRRORD_SESSIONS_MANAGER_URL=http://host.docker.internal:4971/sm
+      MIRRORD_SESSIONS_MANAGER_URL: http://host.docker.internal:4971/sm
+      LD_PRELOAD: /opt/mirrord/lib/libmirrord_remote_bootstrap.so
     env_file:
       - ../ecs/demo.env
       - demo.debug.env
-    # Note: no port is exposed locally, this is equivalent to a remote workload
-    #  only accesible through sessions manager
-    # Expose port only if you need to test incoming capabilities to local running mirrord
+    volumes:
+      - mirrord-bootstrap:/opt/mirrord/lib:ro
+    # Expose port only if you need to test incoming capabilities to local running mirrord.
     ports:
       - "8088:8080"
 
-  mirrord-deps-builder-remote:
-    image: mirrord-deps-builder:remote
-    build:
-      context: ../..
-      dockerfile: sample/capabilities-rust/mirrord-dependancies-builder/Dockerfile
-      target: remote
+volumes:
+  mirrord-bootstrap:

@@ -117,9 +117,7 @@ case "$component" in
   backend)
     default_local_tag="capabilities-rust-backend"
     dockerfile_path="$mirrord_root/sample/capabilities-rust/backend/Dockerfile"
-    deps_builder_dockerfile="$mirrord_root/sample/capabilities-rust/mirrord-dependancies-builder/Dockerfile"
     build_context="$mirrord_root/sample/capabilities-rust"
-    deps_builder_context="$mirrord_root"
     ;;
   frontend-next)
     default_local_tag="capabilities-rust-frontend-next"
@@ -146,18 +144,6 @@ else
   release="1"
 fi
 
-build_deps_builder() {
-  printf 'Building mirrord-deps-builder image as mirrord-deps-builder:remote\n'
-  docker build -t mirrord-deps-builder:remote \
-    --build-arg RELEASE="$release" \
-    --target remote \
-    -f "$deps_builder_dockerfile" \
-    "$deps_builder_context"
-}
-
-if [ "$component" = "backend" ]; then
-  build_deps_builder
-fi
 
 printf 'Building %s image locally as %s\n' "$component" "$local_tag"
 
@@ -165,7 +151,7 @@ if [ "$component" = "backend" ]; then
   docker build -t "$local_tag" \
     --build-arg RELEASE="$release" \
     -f "$dockerfile_path" \
-    --target mirrord-remote \
+    --target runtime \
     "$build_context"
 else
   docker build -t "$local_tag" \
