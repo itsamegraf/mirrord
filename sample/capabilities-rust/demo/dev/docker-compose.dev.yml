@@ -1,22 +1,66 @@
 services:
   # Fallback for running the remote stack locally without AWS.
-  # Build locally:
-  # * with Docker Buildx:
-  # RELEASE=0 PLATFORMS=linux/arm64 docker buildx bake -f ci/docker-bake.hcl remote-bootstrap --load
   #
-  # * If Docker Buildx Bake is unavailable, build the same target directly:
-  # docker build --platform linux/arm64 --build-arg RELEASE=0 --file mirrord/agent/Dockerfile \
-  #   --target remote-bootstrap --tag ghcr.io/metalbear-co/mirrord-remote-bootstrap:dev .
+  # mirrord-remote-bootstrap and mirrord-remote-layer live in the operator repo.
+  # For the image-based installer, build and package them with the ECS demo helper:
   #
-  # Use linux/amd64 instead when that matches the local container runtime.
+  # ../ecs/build.sh remote-bootstrap
+  #
+  # That tags mirrord-remote-bootstrap:local, which this file expects to already exist.
   install-mirrord-remote-bootstrap:
-    image: ghcr.io/metalbear-co/mirrord-remote-bootstrap:dev
+    image: mirrord-remote-bootstrap:local
     pull_policy: never
     command:
       - /bin/sh
       - -c
       - cp /opt/mirrord/lib/libmirrord_remote_bootstrap.so /mirrord/libmirrord_remote_bootstrap.so
     volumes:
+      - mirrord-bootstrap:/mirrord
+
+  # Direct artifact install, without building or tagging a bootstrap image.
+  #
+  # The operator checkout drives this whole loop, including the E2E suite, with:
+  #
+  # cargo xtask ecs-demo --environment local boot
+  # cargo xtask ecs-demo --environment local e2e
+  # cargo xtask ecs-demo --environment local teardown
+  #
+  # Those need a sessions-manager listening on the host (`cargo run -p mirrord-sessions-manager`).
+  # The steps below are the same thing by hand.
+  #
+  # Build in the operator checkout (pass --mirrord to include local mirrord changes):
+  #
+  # cargo xtask build-remote-bootstrap --mirrord ../mirrord
+  #
+  # Then, from this directory, run these after each successful build:
+  #
+  # docker compose -f docker-compose.dev.yml run --rm install-mirrord-remote-bootstrap-from-build &&
+  # docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate backend-mirrord-remote
+  #
+  # --no-deps prevents the image installer from overwriting the artifact. Recreating the
+  # backend ensures it loads the installed library rather than keeping the old one mapped.
+  # REMOTE_BOOTSTRAP_ARTIFACT is relative to the runner's operator target directory.
+  # For --target aarch64-unknown-linux-gnu --release, set it to
+  # aarch64-unknown-linux-gnu/release/libmirrord_remote_bootstrap.so (use x86_64 for amd64).
+  # The build target must match the backend container's architecture.
+  install-mirrord-remote-bootstrap-from-build:
+    image: debian:bookworm-slim
+    # Explicit `compose run` enables this service; ordinary `compose up` uses the image.
+    profiles: [local-build]
+    environment:
+      REMOTE_BOOTSTRAP_ARTIFACT: ${REMOTE_BOOTSTRAP_ARTIFACT:-debug/libmirrord_remote_bootstrap.so}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        source="/build/$${REMOTE_BOOTSTRAP_ARTIFACT}"
+        test -f "$$source" || { echo "Bootstrap artifact not found: $$source. Run cargo xtask build-remote-bootstrap with matching target/profile first." >&2; exit 1; }
+        echo "Installing bootstrap from $$source"
+        cp "$$source" /mirrord/libmirrord_remote_bootstrap.so.tmp
+        mv /mirrord/libmirrord_remote_bootstrap.so.tmp /mirrord/libmirrord_remote_bootstrap.so
+        sha256sum /mirrord/libmirrord_remote_bootstrap.so
+    volumes:
+      - ci-runner-operator-target:/build:ro
       - mirrord-bootstrap:/mirrord
 
   backend-mirrord-remote:
@@ -30,6 +74,9 @@ services:
     environment:
       MIRRORD_SESSIONS_MANAGER_URL: http://host.docker.internal:4971/sm
       LD_PRELOAD: /opt/mirrord/lib/libmirrord_remote_bootstrap.so
+    # Docker Desktop resolves host.docker.internal on its own; Linux engines need it mapped.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     env_file:
       - ../ecs/demo.env
       - demo.debug.env
@@ -37,7 +84,10 @@ services:
       - mirrord-bootstrap:/opt/mirrord/lib:ro
     # Expose port only if you need to test incoming capabilities to local running mirrord.
     ports:
-      - "8088:8080"
+      - '8088:8080'
 
 volumes:
   mirrord-bootstrap:
+  ci-runner-operator-target:
+    external: true
+    name: ci-runner-operator-target
